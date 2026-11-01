@@ -1,0 +1,10 @@
+{
+  "name": "job-finder",
+  "version": "0.1.0",
+  "description": "Finds web development job offers from job APIs",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "license": "MIT"
+}

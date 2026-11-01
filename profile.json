@@ -1,0 +1,23 @@
+{
+  "searchKeywords": ["angular", "react", "frontend"],
+
+  "skills": {
+    "angular": 3, "typescript": 3, "javascript": 3, "react": 3,
+    "rxjs": 2, "ngrx": 2, "nx": 1, "scss": 2, "sass": 1, "tailwind": 2,
+    "html": 1, "css": 1,
+    "node": 2, "express": 2, "nestjs": 2,
+    "cypress": 2, "jest": 1, "d3": 2, "echarts": 2,
+    "git": 1, "github actions": 1, "ci/cd": 1, "docker": 1,
+    "aws": 1, "azure": 1, "terraform": 1,
+    "devsecops": 2, "owasp": 1, "security": 1,
+    "accessibility": 1, "wcag": 1,
+    "python": 1
+  },
+
+   "avoid": {
+    "php": 10, "wordpress": 10, "ruby": 10, "salesforce": 15,
+    "java": 25, "c++": 25, "golang": 20
+  },
+
+  "pointsFor100": 15
+}

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Finder</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #f4f5f7; margin: 0; padding: 1.5rem 2rem 3rem; color: #222; }
+    header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+    h1 { margin: 0; font-size: 1.6rem; }
+    .sub { color: #666; font-size: .9rem; margin-top: .25rem; }
+    .warn { color: #b45309; font-size: .85rem; margin-top: .25rem; }
+    button { font: inherit; cursor: pointer; border: none; border-radius: 6px; padding: .45rem .9rem; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .primary { background: #2563eb; color: #fff; }
+    .primary:hover { background: #1d4ed8; }
+
+    .toolbar { display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; align-items: center; background: #fff; padding: .75rem 1rem; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 1.25rem; }
+    .tabs { display: flex; flex-wrap: wrap; gap: .3rem; }
+    .tab { background: #eef1f5; color: #333; }
+    .tab.active { background: #222; color: #fff; }
+    .toolbar label { font-size: .9rem; display: flex; align-items: center; gap: .4rem; }
+    .toolbar input[type="search"], .toolbar select { font: inherit; padding: .35rem .5rem; border: 1px solid #d0d5dd; border-radius: 6px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 1rem; }
+    .card { background: #fff; border-radius: 10px; padding: 1.1rem 1.2rem; box-shadow: 0 1px 3px rgba(0,0,0,.1); display: flex; flex-direction: column; gap: .5rem; }
+    .card.new { border-left: 4px solid #16a34a; }
+    .card.applied { border-left: 4px solid #7c3aed; }
+    .top { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+    .badge { font-size: .7rem; font-weight: 700; padding: .15rem .45rem; border-radius: 4px; color: #fff; }
+    .badge.new { background: #16a34a; }
+    .badge.applied { background: #7c3aed; }
+    .source { font-size: .75rem; font-weight: 600; color: #2563eb; text-transform: uppercase; }
+    .score { margin-left: auto; font-weight: 700; font-size: .85rem; padding: .2rem .55rem; border-radius: 999px; }
+    .score.high { background: #dcfce7; color: #166534; }
+    .score.mid { background: #fef3c7; color: #92400e; }
+    .score.low { background: #f1f5f9; color: #64748b; }
+    .card h2 { font-size: 1.05rem; margin: 0; }
+    .company { font-weight: 600; color: #555; margin: 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: .3rem; margin: 0; font-size: .8rem; }
+    .chips span { background: #eef1f5; padding: .15rem .45rem; border-radius: 6px; }
+    .chips .skill { background: #dcfce7; color: #166534; }
+    .chips .avoid { background: #fee2e2; color: #991b1b; }
+    .actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: auto; padding-top: .4rem; }
+    .actions a { background: #2563eb; color: #fff; text-decoration: none; padding: .45rem .9rem; border-radius: 6px; }
+    .actions a:hover { background: #1d4ed8; }
+    .btn-applied { background: #ede9fe; color: #5b21b6; }
+    .btn-hide { background: #f1f5f9; color: #475569; }
+    .empty { text-align: center; color: #666; padding: 3rem 1rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Job Finder</h1>
+      <div class="sub" id="info">Loading…</div>
+      <div class="warn" id="warnings"></div>
+    </div>
+    <div>
+      <button class="primary" id="refresh">Search for new jobs</button>
+      <div class="sub" id="refresh-status"></div>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="tabs" id="tabs"></div>
+    <label>Sort
+      <select id="sort">
+        <option value="score">Best match</option>
+        <option value="date">Newest</option>
+      </select>
+    </label>
+    <label>Min score <input type="range" id="min-score" min="0" max="100" step="10" value="0"> <b id="min-score-value">0</b></label>
+    <label><input type="search" id="search" placeholder="Filter: title, company, city…"></label>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <script>
+    const state = { data: null, tab: "review", sort: "score", minScore: 0, query: "" };
+
+    const TABS = [
+      { id: "review", label: "To review" },
+      { id: "new", label: "New" },
+      { id: "applied", label: "Applied" },
+      { id: "hidden", label: "Hidden" },
+      { id: "all", label: "All" },
+    ];
+
+    // Avoid broken HTML if a title contains < > & or quotes
+    function esc(text = "") {
+      return String(text ?? "")
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    // Only allow normal web links in "View offer"
+    function safeUrl(url) {
+      return /^https?:\/\//i.test(url || "") ? url : "#";
+    }
+
+    async function load() {
+      const res = await fetch("/api/jobs");
+      state.data = await res.json();
+      render();
+    }
+
+    // Jobs for the current tab, before search / score filters
+    function jobsForTab(tab) {
+      const { jobs, statuses } = state.data;
+      const byKey = Object.fromEntries(jobs.map((job) => [job.key, job]));
+
+      if (tab === "applied" || tab === "hidden") {
+        return Object.entries(statuses)
+          .filter(([, s]) => s.status === tab)
+          .map(([key, s]) => ({ ...s.job, ...(byKey[key] || {}), key }));
+      }
+      if (tab === "review") return jobs.filter((job) => !statuses[job.key]);
+      if (tab === "new") return jobs.filter((job) => job.isNew && !statuses[job.key]);
+      return jobs;
+    }
+
+    function visibleJobs() {
+      const query = state.query.toLowerCase();
+      return jobsForTab(state.tab)
+        .filter((job) => (job.score ?? 0) >= state.minScore)
+        .filter((job) => !query || `${job.title} ${job.company} ${job.location}`.toLowerCase().includes(query))
+        .sort((a, b) => state.sort === "date"
+          ? (b.date || "").localeCompare(a.date || "")
+          : (b.score ?? 0) - (a.score ?? 0));
+    }
+
+    function scoreClass(score) {
+      return score >= 60 ? "high" : score >= 30 ? "mid" : "low";
+    }
+
+    function cardHtml(job) {
+      const status = state.data.statuses[job.key];
+      const isApplied = status?.status === "applied";
+      const isHidden = status?.status === "hidden";
+      const score = job.score ?? 0;
+
+      return `
+        <article class="card ${isApplied ? "applied" : job.isNew ? "new" : ""}">
+          <div class="top">
+            ${job.isNew && !status ? `<span class="badge new">NEW</span>` : ""}
+            ${isApplied ? `<span class="badge applied">APPLIED ${esc(status.date)}</span>` : ""}
+            <span class="source">${esc(job.source)}</span>
+            <span class="score ${scoreClass(score)}" title="How well this job matches profile.json">${score}%</span>
+          </div>
+          <h2>${esc(job.title)}</h2>
+          <p class="company">${esc(job.company)}</p>
+          <p class="chips">
+            <span>${esc(job.location || "?")}</span>
+            ${job.date ? `<span>${esc(job.date)}</span>` : ""}
+            ${job.salary ? `<span>${esc(job.salary)}</span>` : ""}
+          </p>
+          ${job.matchedSkills?.length ? `<p class="chips">${job.matchedSkills.map((s) => `<span class="skill">${esc(s)}</span>`).join("")}</p>` : ""}
+          ${job.avoidedWords?.length ? `<p class="chips">${job.avoidedWords.map((s) => `<span class="avoid">${esc(s)}</span>`).join("")}</p>` : ""}
+          <div class="actions">
+            <a href="${esc(safeUrl(job.url))}" target="_blank" rel="noopener">View offer</a>
+            ${isApplied
+              ? `<button class="btn-applied" data-action="" data-key="${esc(job.key)}">Undo applied</button>`
+              : `<button class="btn-applied" data-action="applied" data-key="${esc(job.key)}">Mark applied</button>`}
+            ${isHidden
+              ? `<button class="btn-hide" data-action="" data-key="${esc(job.key)}">Unhide</button>`
+              : isApplied ? "" : `<button class="btn-hide" data-action="hidden" data-key="${esc(job.key)}">Hide</button>`}
+          </div>
+        </article>`;
+    }
+
+    function render() {
+      const { data } = state;
+
+      // Header info
+      const lastRun = data.lastRun ? new Date(data.lastRun).toLocaleString() : "never";
+      document.getElementById("info").textContent =
+        `Last search: ${lastRun} · Keywords: ${data.keywords.join(", ") || "-"}`;
+      const failed = data.sources.filter((s) => !s.ok);
+      document.getElementById("warnings").textContent = failed.length
+        ? `Failed last time: ${failed.map((s) => `${s.label} (${s.error})`).join(", ")}` : "";
+
+      // Tabs with counts
+      document.getElementById("tabs").innerHTML = TABS.map((tab) =>
+        `<button class="tab ${state.tab === tab.id ? "active" : ""}" data-tab="${tab.id}">
+          ${tab.label} (${jobsForTab(tab.id).length})</button>`).join("");
+
+      // Cards
+      const jobs = visibleJobs();
+      document.getElementById("grid").innerHTML = jobs.length
+        ? jobs.map(cardHtml).join("")
+        : `<p class="empty">${data.jobs.length ? "No jobs here with these filters." : "No jobs yet. Click “Search for new jobs”."}</p>`;
+    }
+
+    async function setStatus(key, status) {
+      const job = jobsForTab("all").find((j) => j.key === key) || state.data.statuses[key]?.job;
+      const res = await fetch("/api/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, status, job }),
+      });
+      if (!res.ok) return alert("Could not save. Is the server still running?");
+
+      if (status) state.data.statuses[key] = { status, date: new Date().toISOString().slice(0, 10), job };
+      else delete state.data.statuses[key];
+      render();
+    }
+
+    async function refresh() {
+      const button = document.getElementById("refresh");
+      const statusText = document.getElementById("refresh-status");
+      button.disabled = true;
+      statusText.textContent = "Searching… (about 10 seconds)";
+      try {
+        const res = await fetch("/api/refresh", { method: "POST" });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error);
+        statusText.textContent = `Done: ${result.newCount} new, ${result.total} total.`;
+        state.tab = result.newCount ? "new" : state.tab;
+        await load();
+      } catch (err) {
+        statusText.textContent = `Search failed: ${err.message}`;
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    // ---- Events ----
+    document.getElementById("tabs").addEventListener("click", (e) => {
+      const tab = e.target.closest("[data-tab]");
+      if (tab) { state.tab = tab.dataset.tab; render(); }
+    });
+    document.getElementById("grid").addEventListener("click", (e) => {
+      const button = e.target.closest("button[data-key]");
+      if (button) setStatus(button.dataset.key, button.dataset.action);
+    });
+    document.getElementById("sort").addEventListener("change", (e) => { state.sort = e.target.value; render(); });
+    document.getElementById("min-score").addEventListener("input", (e) => {
+      state.minScore = Number(e.target.value);
+      document.getElementById("min-score-value").textContent = e.target.value;
+      render();
+    });
+    document.getElementById("search").addEventListener("input", (e) => { state.query = e.target.value; render(); });
+    document.getElementById("refresh").addEventListener("click", refresh);
+
+    load().catch(() => {
+      document.getElementById("info").textContent = "Could not load jobs. Is the server running (node server.js)?";
+    });
+  </script>
+</body>
+</html>
